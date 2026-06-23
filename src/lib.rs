@@ -30,6 +30,9 @@ pub mod diffusion_py {
     use super::diffusion::interstitial::CarbonitridingSolverPy as CarbonitridingSolver;
 
     #[pymodule_export]
+    use super::diffusion::interstitial::CarbonitridingInput;
+
+    #[pymodule_export]
     use super::diffusion::interstitial::ElementResults;
 }
 

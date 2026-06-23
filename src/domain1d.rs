@@ -11,6 +11,7 @@ use pyo3::prelude::*;
 // ---------------------------------------------------------------------------
 
 #[pyclass(from_py_object)]
+#[derive(Debug)]
 pub struct ImmersedNodeDomain1D {
     pub cell_sizes: Vec<f64>,
     pub spacing: Vec<f64>,
@@ -162,6 +163,10 @@ impl ImmersedNodeDomain1D {
 
     pub fn len(&self) -> usize {
         self.interior.len() + 2
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 

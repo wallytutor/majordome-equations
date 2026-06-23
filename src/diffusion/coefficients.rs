@@ -116,7 +116,22 @@ impl ArrheniusModifiedDiffusivity {
 
             d0 * (-ea / (GAS_CONSTANT * temperature)).exp()
         } else {
-            panic!("Cannot evaluate natively with Python callbacks!");
+            // TODO recheck this...
+            let py = unsafe { Python::assume_attached() };
+            let py_array = PyList::new(py, x)
+                .map(|list| list.into_any())
+                .unwrap_or_else(|_| py.None().bind(py).clone());
+
+            let d0 = self
+                .pre_exponential
+                .call(py, &py_array, temperature)
+                .unwrap_or(0.0);
+            let ea = self
+                .activation_energy
+                .call(py, &py_array, temperature)
+                .unwrap_or(0.0);
+
+            d0 * (-ea / (GAS_CONSTANT * temperature)).exp()
         }
     }
 }

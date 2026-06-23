@@ -3,17 +3,16 @@ use majordome_constants::prelude::GAS_CONSTANT;
 use pyo3::prelude::*;
 
 fn composition_dependence(x: &[f64]) -> f64 {
-    if x.len() != 2 {
-        panic!("composition array must have at least two elements");
-    }
-
-    x[0] + 0.72 * x[1]
+    let x0 = x.first().copied().unwrap_or(0.0);
+    let x1 = x.get(1).copied().unwrap_or(0.0);
+    x0 + 0.72 * x1
 }
 
 fn pre_exponential(x: &[f64]) -> f64 {
     let b = -320.0 / GAS_CONSTANT;
+    let sum = x.first().copied().unwrap_or(0.0) + x.get(1).copied().unwrap_or(0.0);
 
-    (b * composition_dependence(x)).exp() / (1.0 - 5.0 * (x[0] + x[1]))
+    (b * composition_dependence(x)).exp() / (1.0 - 5.0 * sum)
 }
 
 fn activation_modifier(x: &[f64]) -> f64 {
