@@ -1,4 +1,4 @@
-# majordome-sample
+# majordome-equations
 
 Crate providing equations and models for the Majordome stack.
 
