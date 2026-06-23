@@ -40,4 +40,7 @@ pub mod diffusion_py {
 pub mod equations {
     #[pymodule_export]
     use super::domain1d_py;
+
+    #[pymodule_export]
+    use super::diffusion_py;
 }
