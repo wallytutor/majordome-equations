@@ -6,11 +6,9 @@
 
 use pyo3::prelude::*;
 
-mod diffusion;
-mod domain1d;
+pub mod diffusion;
+pub mod domain1d;
 pub mod prelude;
-
-pub use domain1d::ImmersedNodeDomain1D;
 
 #[pymodule(name = "domain1d")]
 pub mod domain1d_py {
