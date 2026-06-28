@@ -67,7 +67,7 @@ impl std::fmt::Display for ImmersedNodeDomain1D {
 
         // West boundary cell
         let zc_west = z[0];
-        let dz_west = zf[0] - zc_west;
+        let dz_west = self.cell_sizes[0];
 
         lines.push(format!(
             "Cell {:04} at {}, Size = {}, Range = [{}; {}]",
@@ -81,7 +81,7 @@ impl std::fmt::Display for ImmersedNodeDomain1D {
         // Interior cells
         for i in 0..n_interior {
             let zc = self.interior[i];
-            let dz = self.cell_sizes[i];
+            let dz = self.cell_sizes[i + 1];
             let z0 = zf[i];
             let z1 = zf[i + 1];
 
@@ -97,7 +97,7 @@ impl std::fmt::Display for ImmersedNodeDomain1D {
 
         // East boundary cell
         let zc_east = z[n_total - 1];
-        let dz_east = zc_east - zf[n_total - 2];
+        let dz_east = self.cell_sizes[n_total - 1];
 
         lines.push(format!(
             "Cell {:04} at {}, Size = {}, Range = [{}; {}]",
@@ -107,7 +107,6 @@ impl std::fmt::Display for ImmersedNodeDomain1D {
             exponential_fmt(zf[n_total - 2]),
             exponential_fmt(zc_east)
         ));
-
         lines.push(String::new());
 
         for i in 1..n_total {
