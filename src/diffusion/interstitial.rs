@@ -8,24 +8,16 @@ use crate::domain1d::ImmersedNodeDomain1D;
 use majordome_calphad::mixture::FractionConverter;
 use majordome_calphad::mixture::InterstitialConverter;
 use majordome_numerical::prelude::*;
+use majordome_utilities::prelude::*;
 use pyo3::prelude::*;
+
+// ---------------------------------------------------------------------------
 
 pub type DiffusivityCallbackFn = dyn Fn(usize, &[f64], f64) -> f64 + Send + Sync;
 pub type TemperatureCallbackFn = dyn Fn(f64) -> f64 + Send + Sync;
 pub type VectorCallbackFn = dyn Fn(f64) -> Vec<f64> + Send + Sync;
 
-pub struct NonlinearDiffusionSolverInput {
-    pub grid: ImmersedNodeDomain1D,
-    pub y0: Vec<Vec<f64>>,
-    pub time_points: Vec<f64>,
-    pub time_steps: Vec<f64>,
-    pub species_names: Vec<String>,
-    pub molar_masses: Vec<f64>,
-    pub diffusivity_callback: Box<DiffusivityCallbackFn>,
-    pub external_temperature: Box<TemperatureCallbackFn>,
-    pub external_coefficients: Box<VectorCallbackFn>,
-    pub external_potential: Box<VectorCallbackFn>,
-}
+// ---------------------------------------------------------------------------
 
 struct FvmParams<'a> {
     delta_w: &'a [f64],
@@ -34,11 +26,15 @@ struct FvmParams<'a> {
     absolute_tolerance: f64,
 }
 
+// ---------------------------------------------------------------------------
+
 struct SurfaceBoundaryState {
     boundary_concentrations: Vec<f64>,
     diffusivities: Vec<f64>,
     fluxes: Vec<f64>,
 }
+
+// ---------------------------------------------------------------------------
 
 #[pyclass(from_py_object, name = "ElementResults")]
 #[derive(Clone, Debug)]
@@ -65,6 +61,23 @@ impl ElementResults {
         self.mass_intake.clone()
     }
 }
+
+// ---------------------------------------------------------------------------
+
+pub struct NonlinearDiffusionSolverInput {
+    pub grid: ImmersedNodeDomain1D,
+    pub y0: Vec<Vec<f64>>,
+    pub time_points: Vec<f64>,
+    pub time_steps: Vec<f64>,
+    pub species_names: Vec<String>,
+    pub molar_masses: Vec<f64>,
+    pub diffusivity_callback: Box<DiffusivityCallbackFn>,
+    pub external_temperature: Box<TemperatureCallbackFn>,
+    pub external_coefficients: Box<VectorCallbackFn>,
+    pub external_potential: Box<VectorCallbackFn>,
+}
+
+// ---------------------------------------------------------------------------
 
 pub struct NonlinearDiffusionSolver {
     pub grid: ImmersedNodeDomain1D,
@@ -101,14 +114,14 @@ impl NonlinearDiffusionSolver {
 
         let delta = &input.grid.spacing[1..input.grid.spacing.len() - 1];
 
-        delta_e[0] = delta[0] * input.grid.cell_sizes[0];
-        delta_e[num_points - 1] = input.grid.cell_sizes[num_points - 1].powi(2) / 2.0;
+        delta_e[0] = delta[0] * input.grid.cell_sizes[1];
+        delta_e[num_points - 1] = input.grid.cell_sizes[num_points].powi(2) / 2.0;
 
-        delta_w[0] = input.grid.cell_sizes[0].powi(2) / 2.0;
-        delta_w[num_points - 1] = delta[num_points - 2] * input.grid.cell_sizes[num_points - 2];
+        delta_w[0] = input.grid.cell_sizes[1].powi(2) / 2.0;
+        delta_w[num_points - 1] = delta[num_points - 2] * input.grid.cell_sizes[num_points - 1];
 
         for i in 1..num_points - 1 {
-            let l_i = input.grid.cell_sizes[i];
+            let l_i = input.grid.cell_sizes[i + 1];
             delta_w[i] = l_i * delta[i - 1];
             delta_e[i] = l_i * delta[i];
         }
@@ -432,8 +445,13 @@ impl NonlinearDiffusionSolver {
 
             if i % every == 0 || i == n_steps {
                 println!(
-                    "Step {:05}/{:05} (t = {:e} s) .. iters = {}, absErr = {:e}, relErr = {:e}",
-                    i, n_steps, self.time_points[i], iteration, abs_err, rel_err
+                    "Step {:05}/{:05} (t = {} s) .. iters = {}, absErr = {}, relErr = {}",
+                    i,
+                    n_steps,
+                    exponential_fmt(self.time_points[i]),
+                    iteration,
+                    exponential_fmt(abs_err),
+                    exponential_fmt(rel_err)
                 );
             }
         }
@@ -485,6 +503,8 @@ impl NonlinearDiffusionSolver {
     }
 }
 
+// ---------------------------------------------------------------------------
+
 #[pyclass(get_all, set_all, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct CarbonitridingInput {
@@ -494,6 +514,9 @@ pub struct CarbonitridingInput {
     pub time_points: Vec<f64>,
     pub time_steps: Vec<f64>,
 }
+
+// ---------------------------------------------------------------------------
+// Constructor
 
 #[pymethods]
 impl CarbonitridingInput {
@@ -515,11 +538,15 @@ impl CarbonitridingInput {
     }
 }
 
+// ---------------------------------------------------------------------------
+
 pub struct CarbonitridingSolver {
     pub solver: NonlinearDiffusionSolver,
     pub fraction_converter: FractionConverter,
     pub interstitial_converter: InterstitialConverter,
 }
+
+// ---------------------------------------------------------------------------
 
 impl CarbonitridingSolver {
     pub fn new(
@@ -659,10 +686,15 @@ impl CarbonitridingSolver {
     }
 }
 
+// ---------------------------------------------------------------------------
+
 #[pyclass(name = "CarbonitridingSolver")]
 pub struct CarbonitridingSolverPy {
     solver: CarbonitridingSolver,
 }
+
+// ---------------------------------------------------------------------------
+// Constructor
 
 #[pymethods]
 impl CarbonitridingSolverPy {
@@ -772,7 +804,13 @@ impl CarbonitridingSolverPy {
     pub fn integrate(&mut self, every: usize) {
         self.solver.integrate(every);
     }
+}
 
+// ---------------------------------------------------------------------------
+// Methods
+
+#[pymethods]
+impl CarbonitridingSolverPy {
     pub fn get_reinitialization(&self) -> PyResult<(Vec<f64>, Vec<f64>)> {
         self.solver
             .get_reinitialization()
@@ -784,7 +822,13 @@ impl CarbonitridingSolverPy {
             .get_surface_fluxes(idx)
             .map_err(pyo3::exceptions::PyIndexError::new_err)
     }
+}
 
+// ---------------------------------------------------------------------------
+// Getters/setters
+
+#[pymethods]
+impl CarbonitridingSolverPy {
     #[getter]
     pub fn carbon_results(&self) -> ElementResults {
         self.solver.solver.results[0].clone()
@@ -831,6 +875,8 @@ impl CarbonitridingSolverPy {
     }
 }
 
+// ---------------------------------------------------------------------------
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -874,3 +920,5 @@ mod test {
         Ok(())
     }
 }
+
+// ---------------------------------------------------------------------------
