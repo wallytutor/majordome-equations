@@ -68,7 +68,6 @@ pub struct NonlinearDiffusionSolverInput {
     pub grid: ImmersedNodeDomain1D,
     pub y0: Vec<Vec<f64>>,
     pub time_points: Vec<f64>,
-    pub time_steps: Vec<f64>,
     pub species_names: Vec<String>,
     pub molar_masses: Vec<f64>,
     pub diffusivity_callback: Box<DiffusivityCallbackFn>,
@@ -84,7 +83,6 @@ pub struct NonlinearDiffusionSolver {
     pub fields: Vec<DiffusionField1D>,
     pub num_points: usize,
     pub time_points: Vec<f64>,
-    pub time_steps: Vec<f64>,
 
     pub max_nonlin_iter: usize,
     pub relaxation_factor: f64,
@@ -126,7 +124,7 @@ impl NonlinearDiffusionSolver {
             delta_e[i] = l_i * delta[i];
         }
 
-        let n_steps = input.time_steps.len();
+        let n_steps = input.time_points.len().saturating_sub(1);
         let num_species = input.species_names.len();
 
         let mut fields = Vec::with_capacity(num_species);
@@ -149,7 +147,6 @@ impl NonlinearDiffusionSolver {
             fields,
             num_points,
             time_points: input.time_points,
-            time_steps: input.time_steps,
             max_nonlin_iter: 50,
             relaxation_factor: 0.75,
             absolute_tolerance: 1e-6,
@@ -409,15 +406,14 @@ impl NonlinearDiffusionSolver {
 
         (iteration, abs_err, rel_err, converged)
     }
-
     pub fn integrate(&mut self, every: usize) {
         self.store_state(0);
 
-        let n_steps = self.time_steps.len();
+        let n_steps = self.time_points.len().saturating_sub(1);
 
         for i in 1..=n_steps {
             let t = self.time_points[i - 1];
-            let tau = self.time_steps[i - 1];
+            let tau = self.time_points[i] - self.time_points[i - 1];
 
             for s in 0..self.fields.len() {
                 for j in 0..self.num_points {
@@ -481,7 +477,7 @@ impl NonlinearDiffusionSolver {
             if idx == 0 {
                 self.results[s].mass_intake[0] = 0.0;
             } else {
-                let dt = self.time_steps[idx - 1];
+                let dt = self.time_points[idx] - self.time_points[idx - 1];
 
                 self.results[s].mass_intake[idx] = self.results[s].mass_intake[idx - 1]
                     + 0.5 * (self.results[s].flux[idx - 1] + self.results[s].flux[idx]) * dt;
@@ -512,7 +508,6 @@ pub struct CarbonitridingInput {
     pub carbon_mass_fraction: Vec<f64>,
     pub nitrogen_mass_fraction: Vec<f64>,
     pub time_points: Vec<f64>,
-    pub time_steps: Vec<f64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -526,14 +521,12 @@ impl CarbonitridingInput {
         carbon_mass_fraction: Vec<f64>,
         nitrogen_mass_fraction: Vec<f64>,
         time_points: Vec<f64>,
-        time_steps: Vec<f64>,
     ) -> Self {
         Self {
             grid,
             carbon_mass_fraction,
             nitrogen_mass_fraction,
             time_points,
-            time_steps,
         }
     }
 }
@@ -619,7 +612,6 @@ impl CarbonitridingSolver {
             grid: input.grid,
             y0,
             time_points: input.time_points,
-            time_steps: input.time_steps,
             species_names,
             molar_masses,
             diffusivity_callback,
@@ -627,7 +619,6 @@ impl CarbonitridingSolver {
             external_coefficients,
             external_potential: external_potential_wrapper,
         });
-
         Ok(Self {
             solver,
             fraction_converter,
@@ -888,7 +879,6 @@ mod test {
         let y0_c = vec![0.001; 5];
         let y0_n = vec![0.0005; 5];
         let time_points = vec![0.0, 10.0];
-        let time_steps = vec![10.0];
 
         let carbon_model =
             ArrheniusModifiedDiffusivity::from_rust_fns(|_x, _t| 1e-11, |_x, _t| 0.0);
@@ -900,7 +890,6 @@ mod test {
             carbon_mass_fraction: y0_c,
             nitrogen_mass_fraction: y0_n,
             time_points,
-            time_steps,
         };
 
         let mut solver = CarbonitridingSolver::new(
