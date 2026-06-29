@@ -42,6 +42,7 @@ pub struct ElementResults {
     pub profile: Vec<Vec<f64>>,
     pub flux: Vec<f64>,
     pub mass_intake: Vec<f64>,
+    pub mass_intake_from_profile: Vec<f64>,
 }
 
 #[pymethods]
@@ -59,6 +60,11 @@ impl ElementResults {
     #[getter]
     pub fn mass_intake(&self) -> Vec<f64> {
         self.mass_intake.clone()
+    }
+
+    #[getter]
+    pub fn mass_intake_from_profile(&self) -> Vec<f64> {
+        self.mass_intake_from_profile.clone()
     }
 }
 
@@ -104,70 +110,10 @@ pub struct NonlinearDiffusionSolver {
     pub external_potential: Box<VectorCallbackFn>,
 }
 
+// ---------------------------------------------------------------------------
+// Private
+
 impl NonlinearDiffusionSolver {
-    pub fn new(input: NonlinearDiffusionSolverInput) -> Self {
-        let num_points = input.grid.interior.len();
-        let mut delta_w = vec![0.0; num_points];
-        let mut delta_e = vec![0.0; num_points];
-
-        let delta = &input.grid.spacing[1..input.grid.spacing.len() - 1];
-
-        delta_e[0] = delta[0] * input.grid.cell_sizes[1];
-        delta_e[num_points - 1] = input.grid.cell_sizes[num_points].powi(2) / 2.0;
-
-        delta_w[0] = input.grid.cell_sizes[1].powi(2) / 2.0;
-        delta_w[num_points - 1] = delta[num_points - 2] * input.grid.cell_sizes[num_points - 1];
-
-        for i in 1..num_points - 1 {
-            let l_i = input.grid.cell_sizes[i + 1];
-            delta_w[i] = l_i * delta[i - 1];
-            delta_e[i] = l_i * delta[i];
-        }
-
-        let n_steps = input.time_points.len().saturating_sub(1);
-        let num_species = input.species_names.len();
-
-        let mut fields = Vec::with_capacity(num_species);
-        let mut results = Vec::with_capacity(num_species);
-        let mut concentrations_tmp = Vec::with_capacity(num_species);
-
-        for y0_s in input.y0.iter().take(num_species) {
-            fields.push(DiffusionField1D::from_concentration(y0_s));
-            concentrations_tmp.push(y0_s.clone());
-
-            results.push(ElementResults {
-                profile: vec![vec![0.0; num_points]; n_steps + 1],
-                flux: vec![0.0; n_steps + 1],
-                mass_intake: vec![0.0; n_steps + 1],
-            });
-        }
-
-        Self {
-            grid: input.grid,
-            fields,
-            num_points,
-            time_points: input.time_points,
-            max_nonlin_iter: 50,
-            relaxation_factor: 0.75,
-            absolute_tolerance: 1e-6,
-            relative_tolerance: 1e-6,
-            concentrations_tmp,
-            delta_w,
-            delta_e,
-            species_names: input.species_names,
-            molar_masses: input.molar_masses,
-            results,
-            diffusivity_callback: input.diffusivity_callback,
-            external_temperature: input.external_temperature,
-            external_coefficients: input.external_coefficients,
-            external_potential: input.external_potential,
-        }
-    }
-
-    pub fn species_names(&self) -> &[String] {
-        &self.species_names
-    }
-
     fn evaluate_diffusivity_at_concentration(
         &self,
         species_idx: usize,
@@ -278,8 +224,13 @@ impl NonlinearDiffusionSolver {
         let size = field.solver.problem.n;
         let mat = &mut field.solver.problem.matrix;
 
-        let fo_b = fourier_number_delta_sq(boundary_diffusivity, tau, params.delta_w[0]);
-        let fo_e = fourier_number_delta_sq(field.face_diffusivity[0], tau, params.delta_e[0]);
+        let d_b = boundary_diffusivity;
+        let delta_w = params.delta_w[0];
+        let fo_b = fourier_number_delta_sq(d_b, tau, delta_w);
+
+        let d_e = field.face_diffusivity[0];
+        let delta_e = params.delta_e[0];
+        let fo_e = fourier_number_delta_sq(d_e, tau, delta_e);
 
         mat.b[0] = 1.0 + 2.0 * fo_b + fo_e;
         mat.c[0] = -fo_e;
@@ -299,8 +250,9 @@ impl NonlinearDiffusionSolver {
         }
 
         let n = size - 1;
-        let fo_w =
-            fourier_number_delta_sq(field.face_diffusivity[n - 1], tau, params.delta_e[n - 1]);
+        let d_w = field.face_diffusivity[n - 1];
+        let delta_e = params.delta_e[n - 1];
+        let fo_w = fourier_number_delta_sq(d_w, tau, delta_e);
 
         mat.a[n] = -fo_w;
         mat.b[n] = 1.0 + fo_w;
@@ -406,6 +358,76 @@ impl NonlinearDiffusionSolver {
 
         (iteration, abs_err, rel_err, converged)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Public
+
+impl NonlinearDiffusionSolver {
+    pub fn new(input: NonlinearDiffusionSolverInput) -> Self {
+        let num_points = input.grid.interior.len();
+        let mut delta_w = vec![0.0; num_points];
+        let mut delta_e = vec![0.0; num_points];
+
+        let delta = &input.grid.spacing[1..input.grid.spacing.len() - 1];
+
+        delta_e[0] = delta[0] * input.grid.cell_sizes[1];
+        delta_e[num_points - 1] = input.grid.cell_sizes[num_points].powi(2) / 2.0;
+
+        delta_w[0] = input.grid.cell_sizes[1].powi(2) / 2.0;
+        delta_w[num_points - 1] = delta[num_points - 2] * input.grid.cell_sizes[num_points - 1];
+
+        for i in 1..num_points - 1 {
+            let l_i = input.grid.cell_sizes[i + 1];
+            delta_w[i] = l_i * delta[i - 1];
+            delta_e[i] = l_i * delta[i];
+        }
+
+        let n_steps = input.time_points.len().saturating_sub(1);
+        let num_species = input.species_names.len();
+
+        let mut fields = Vec::with_capacity(num_species);
+        let mut results = Vec::with_capacity(num_species);
+        let mut concentrations_tmp = Vec::with_capacity(num_species);
+
+        for y0_s in input.y0.iter().take(num_species) {
+            fields.push(DiffusionField1D::from_concentration(y0_s));
+            concentrations_tmp.push(y0_s.clone());
+
+            results.push(ElementResults {
+                profile: vec![vec![0.0; num_points]; n_steps + 1],
+                flux: vec![0.0; n_steps + 1],
+                mass_intake: vec![0.0; n_steps + 1],
+                mass_intake_from_profile: vec![0.0; n_steps + 1],
+            });
+        }
+
+        Self {
+            grid: input.grid,
+            fields,
+            num_points,
+            time_points: input.time_points,
+            max_nonlin_iter: 50,
+            relaxation_factor: 0.75,
+            absolute_tolerance: 1e-6,
+            relative_tolerance: 1e-6,
+            concentrations_tmp,
+            delta_w,
+            delta_e,
+            species_names: input.species_names,
+            molar_masses: input.molar_masses,
+            results,
+            diffusivity_callback: input.diffusivity_callback,
+            external_temperature: input.external_temperature,
+            external_coefficients: input.external_coefficients,
+            external_potential: input.external_potential,
+        }
+    }
+
+    pub fn species_names(&self) -> &[String] {
+        &self.species_names
+    }
+
     pub fn integrate(&mut self, every: usize) {
         self.store_state(0);
 
@@ -469,18 +491,30 @@ impl NonlinearDiffusionSolver {
         let num_species = self.fields.len();
 
         for s in 0..num_species {
-            let mdot = -self.molar_masses[s] * self.fields[s].surface_flux;
+            let factor = 4.0 * self.grid.spacing[0] / self.grid.cell_sizes[1];
+            let mdot = -self.molar_masses[s] * self.fields[s].surface_flux * factor;
 
             self.results[s].profile[idx] = self.fields[s].concentration.clone();
             self.results[s].flux[idx] = mdot;
 
             if idx == 0 {
                 self.results[s].mass_intake[0] = 0.0;
+                self.results[s].mass_intake_from_profile[0] = 0.0;
+
             } else {
                 let dt = self.time_points[idx] - self.time_points[idx - 1];
 
                 self.results[s].mass_intake[idx] = self.results[s].mass_intake[idx - 1]
                     + 0.5 * (self.results[s].flux[idx - 1] + self.results[s].flux[idx]) * dt;
+
+                let mut sum_diff = 0.0;
+
+                for i in 0..self.num_points {
+                    let diff = self.results[s].profile[idx][i] - self.results[s].profile[0][i];
+                    sum_diff += diff * self.grid.cell_sizes[i + 1];
+                }
+
+                self.results[s].mass_intake_from_profile[idx] = sum_diff * self.molar_masses[s];
             }
         }
     }
@@ -491,6 +525,20 @@ impl NonlinearDiffusionSolver {
 
         for s in 0..self.fields.len() {
             for (tot, &val) in total.iter_mut().zip(&self.results[s].mass_intake) {
+                *tot += val;
+            }
+        }
+
+        total
+    }
+
+    pub fn get_total_mass_intake_from_profile(&self) -> Vec<f64> {
+        let num_steps = self.time_points.len();
+        let mut total = vec![0.0; num_steps];
+
+        for s in 0..self.fields.len() {
+
+            for (tot, &val) in total.iter_mut().zip(&self.results[s].mass_intake_from_profile) {
                 *tot += val;
             }
         }
@@ -675,6 +723,10 @@ impl CarbonitridingSolver {
     pub fn get_total_mass_intake(&self) -> Vec<f64> {
         self.solver.get_total_mass_intake()
     }
+
+    pub fn get_total_mass_intake_from_profile(&self) -> Vec<f64> {
+        self.solver.get_total_mass_intake_from_profile()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -790,11 +842,6 @@ impl CarbonitridingSolverPy {
 
         Ok(Self { solver })
     }
-
-    #[pyo3(signature = (every=10))]
-    pub fn integrate(&mut self, every: usize) {
-        self.solver.integrate(every);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -802,6 +849,11 @@ impl CarbonitridingSolverPy {
 
 #[pymethods]
 impl CarbonitridingSolverPy {
+    #[pyo3(signature = (every=10))]
+    pub fn integrate(&mut self, every: usize) {
+        self.solver.integrate(every);
+    }
+
     pub fn get_reinitialization(&self) -> PyResult<(Vec<f64>, Vec<f64>)> {
         self.solver
             .get_reinitialization()
@@ -833,6 +885,11 @@ impl CarbonitridingSolverPy {
     #[getter]
     pub fn total_mass_intake(&self) -> Vec<f64> {
         self.solver.get_total_mass_intake()
+    }
+
+    #[getter]
+    pub fn total_mass_intake_from_profile(&self) -> Vec<f64> {
+        self.solver.get_total_mass_intake_from_profile()
     }
 
     #[getter]
